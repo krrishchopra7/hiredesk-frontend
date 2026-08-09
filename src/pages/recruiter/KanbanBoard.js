@@ -5,6 +5,7 @@ import API from '../../services/api';
 export default function KanbanBoard({ jobId, jobTitle }) {
   const [pipeline, setPipeline] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [copyStatus, setCopyStatus] = useState('');
 
   useEffect(() => {
     if (jobId) fetchPipeline();
@@ -77,17 +78,67 @@ export default function KanbanBoard({ jobId, jobTitle }) {
   };
 
   const handleRequestFeedback = async (candidateId) => {
-    const roundId = prompt('Enter Round Number (1 for Round 1, 2 for Round 2):');
-    if (!roundId) return;
+    const candidate = Object.values(pipeline?.stages || {})
+      .flat()
+      .find(item => item.id === candidateId);
+
+    if (candidate?.feedbackToken) {
+      alert('Feedback has already been requested for this candidate. Use the existing link instead.');
+      return;
+    }
+
+    const roundIdInput = prompt('Enter Round Number (1 for Round 1, 2 for Round 2):');
+    if (!roundIdInput) return;
+
+    const roundId = parseInt(roundIdInput, 10);
+    if (Number.isNaN(roundId) || roundId < 1) {
+      alert('Please enter a valid round number like 1, 2, or 3.');
+      return;
+    }
+
     try {
       const res = await API.post(
         `/api/feedback/request?candidateId=${candidateId}&roundId=${roundId}`
       );
-      alert(
-        `Feedback requested!\n\nShare this link with the interviewer:\nhttp://localhost:3000/feedback/${res.data.feedbackToken}`
-      );
+      const link = `http://localhost:3000/feedback/${res.data.feedbackToken}`;
+      await navigator.clipboard.writeText(link);
+      setCopyStatus('Feedback link copied to clipboard!');
+
+      // Keep the feedback link visible in the current pipeline UI
+      const updatedPipeline = {
+        ...pipeline,
+        stages: {
+          ...pipeline.stages,
+        },
+      };
+
+      Object.keys(updatedPipeline.stages).forEach((stageKey) => {
+        updatedPipeline.stages[stageKey] =
+          updatedPipeline.stages[stageKey].map((candidate) =>
+            candidate.id === candidateId
+              ? { ...candidate, feedbackToken: res.data.feedbackToken }
+              : candidate
+          );
+      });
+
+      setPipeline(updatedPipeline);
+      alert(`Feedback requested!\n\nLink copied:\n${link}`);
     } catch (err) {
-      alert('Feedback already requested for this round or error occurred');
+      const message = err?.response?.data?.message || err?.message ||
+        'Feedback already requested for this round or error occurred';
+      alert(message);
+      console.error('Feedback request failed:', err);
+    }
+  };
+
+  const handleCopyLink = async (token) => {
+    try {
+      const link = `http://localhost:3000/feedback/${token}`;
+      await navigator.clipboard.writeText(link);
+      setCopyStatus('Link copied to clipboard!');
+    } catch (err) {
+      setCopyStatus('Copy failed. Please copy manually.');
+      console.error('Copy failed:', err);
     }
   };
 
@@ -215,9 +266,44 @@ export default function KanbanBoard({ jobId, jobTitle }) {
                                   e.stopPropagation();
                                   handleRequestFeedback(candidate.id);
                                 }}
-                                style={styles.feedbackBtn}>
+                                disabled={Boolean(candidate.feedbackToken)}
+                                style={{
+                                  ...styles.feedbackBtn,
+                                  background: candidate.feedbackToken ? '#cbd5e1' : '#5a67d8',
+                                  color: candidate.feedbackToken ? '#2d3748' : 'white',
+                                  border: candidate.feedbackToken ? '1px solid #a0aec0' : '1px solid #4c51bf',
+                                  cursor: candidate.feedbackToken ? 'not-allowed' : 'pointer',
+                                }}>
                                 📝 Request Feedback
                               </button>
+
+                              {candidate.feedbackToken && (
+                                <div style={styles.feedbackLinkSection}>
+                                  <div style={styles.feedbackLink}>
+                                    <span style={styles.linkLabel}>Feedback Link:</span>
+                                    <a
+                                      href={`http://localhost:3000/feedback/${candidate.feedbackToken}`}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      style={styles.linkUrl}
+                                    >
+                                      http://localhost:3000/feedback/{candidate.feedbackToken}
+                                    </a>
+                                  </div>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleCopyLink(candidate.feedbackToken);
+                                    }}
+                                    style={styles.copyBtn}
+                                  >
+                                    Copy Link
+                                  </button>
+                                  {copyStatus && (
+                                    <div style={styles.copyStatus}>{copyStatus}</div>
+                                  )}
+                                </div>
+                              )}
 
                             </div>
                           )}
@@ -351,6 +437,40 @@ const styles = {
     fontSize: '11px',
     fontWeight: '600',
     cursor: 'pointer',
+  },
+  feedbackLinkSection: {
+    marginTop: '12px',
+    padding: '12px',
+    background: '#f7fafc',
+    border: '1px solid #e2e8f0',
+    borderRadius: '10px',
+  },
+  feedbackLink: {
+    marginBottom: '8px',
+  },
+  linkLabel: {
+    fontWeight: '700',
+    color: '#2d3748',
+    marginRight: '6px',
+  },
+  linkUrl: {
+    color: '#3182ce',
+    textDecoration: 'underline',
+    wordBreak: 'break-all',
+  },
+  copyBtn: {
+    padding: '8px 12px',
+    background: '#667eea',
+    color: 'white',
+    border: 'none',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    fontWeight: '700',
+  },
+  copyStatus: {
+    marginTop: '8px',
+    color: '#2f855a',
+    fontSize: '13px',
   },
   emptyColumn: {
     textAlign: 'center',
